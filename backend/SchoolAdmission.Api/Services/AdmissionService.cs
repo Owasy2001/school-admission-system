@@ -70,13 +70,28 @@ public class AdmissionService
         }
 
         var trimmed = studentIdHeader.Trim();
-        if (trimmed.Length != 17 || !trimmed.All(char.IsDigit))
+        var chars = new char[trimmed.Length];
+        for (var i = 0; i < trimmed.Length; i++)
+        {
+            var ch = trimmed[i];
+            if (ch >= '\u09E6' && ch <= '\u09EF')
+            {
+                chars[i] = (char)('0' + (ch - '\u09E6'));
+            }
+            else
+            {
+                chars[i] = ch;
+            }
+        }
+
+        var asciiDigits = new string(chars);
+        if (asciiDigits.Length != 17 || !asciiDigits.All(c => c >= '0' && c <= '9'))
         {
             errorMessage = "X-Student-Id must be a valid 17-digit numeric Birth Registration Number.";
             return false;
         }
 
-        normalizedId = trimmed;
+        normalizedId = asciiDigits;
         return true;
     }
 

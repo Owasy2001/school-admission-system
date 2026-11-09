@@ -43,6 +43,19 @@ export interface StudentHoldItem {
   expiresAt: string;
 }
 
+export function normalizeDigits(value: string): string {
+  let result = '';
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0x09e6 && code <= 0x09ef) {
+      result += String(code - 0x09e6);
+    } else if (code >= 48 && code <= 57) {
+      result += value[i];
+    }
+  }
+  return result;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -78,7 +91,7 @@ async function requestJson<T>(
     headers.set('Content-Type', 'application/json');
   }
   if (studentId) {
-    headers.set('X-Student-Id', studentId.trim());
+    headers.set('X-Student-Id', normalizeDigits(studentId));
   }
 
   let response: Response;
@@ -176,10 +189,12 @@ export const admissionApi = {
     );
   },
 
-  getHold(holdId: string): Promise<HoldStatusResponse> {
-    return requestJson<HoldStatusResponse>(`/holds/${encodeURIComponent(holdId)}`, {
-      method: 'GET'
-    });
+  getHold(holdId: string, studentId?: string): Promise<HoldStatusResponse> {
+    return requestJson<HoldStatusResponse>(
+      `/holds/${encodeURIComponent(holdId)}`,
+      { method: 'GET' },
+      studentId
+    );
   },
 
   confirmHold(holdId: string, studentId: string): Promise<HoldConfirmResponse> {

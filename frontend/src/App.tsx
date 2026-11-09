@@ -3,6 +3,7 @@ import {
   admissionApi,
   ApiError,
   HoldStatusResponse,
+  normalizeDigits,
   SchoolClassItem,
   StudentHoldItem
 } from './api/client';
@@ -13,7 +14,8 @@ const SELECTED_HOLD_STORAGE_KEY = 'school_admission_selected_hold_id';
 type ActiveTab = 'all' | 'classes' | 'application' | 'my-applications' | 'admin';
 
 export function isValidStudentId(id: string): boolean {
-  return /^\d{17}$/.test(id.trim());
+  const normalized = normalizeDigits(id.trim());
+  return normalized.length === 17;
 }
 
 export function formatRemainingTime(expiresAtIso: string, nowMs: number): {
@@ -38,12 +40,20 @@ export function formatRemainingTime(expiresAtIso: string, nowMs: number): {
   };
 }
 
+function generateSampleStudentId(): string {
+  const randomSuffix = String(Math.floor(1000000000 + Math.random() * 9000000000));
+  return `2015269${randomSuffix}`.slice(0, 17);
+}
+
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('all');
+  const studentInputRef = useRef<HTMLInputElement | null>(null);
+  const applicationPanelRef = useRef<HTMLElement | null>(null);
 
   const [studentId, setStudentId] = useState<string>(() => {
     try {
-      return localStorage.getItem(STUDENT_ID_STORAGE_KEY) || '';
+      const saved = localStorage.getItem(STUDENT_ID_STORAGE_KEY) || '';
+      return normalizeDigits(saved).slice(0, 17);
     } catch {
       return '';
     }
@@ -75,6 +85,19 @@ export function App() {
   const expiredSyncTriggeredRef = useRef<Set<string>>(new Set());
 
   const studentIdValid = useMemo(() => isValidStudentId(studentId), [studentId]);
+
+  const updateStudentIdValue = useCallback((rawValue: string) => {
+    const cleaned = normalizeDigits(rawValue).slice(0, 17);
+    setStudentId((prev) => {
+      if (prev !== cleaned) {
+        setSelectedHoldId(null);
+        setSelectedHoldDetail(null);
+        setMyHolds([]);
+      }
+      return cleaned;
+    });
+    setErrorMessage(null);
+  }, []);
 
   useEffect(() => {
     try {
@@ -138,7 +161,7 @@ export function App() {
         }
 
         if (targetHoldId) {
-          const holdDetail = await admissionApi.getHold(targetHoldId);
+          const holdDetail = await admissionApi.getHold(targetHoldId, currentStudentId);
           setSelectedHoldDetail(holdDetail);
         } else {
           setSelectedHoldDetail(null);
@@ -206,6 +229,26 @@ export function App() {
     }
   }, [nowMs, myHolds, fetchClasses, fetchStudentData, studentId, studentIdValid, selectedHoldId]);
 
+  const handleStudentIdSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!studentIdValid) {
+      setErrorMessage(
+        `Birth Registration Number (X-Student-Id) must be 17 digits. Currently entered: ${studentId.length} digit(s).`
+      );
+      studentInputRef.current?.focus();
+      return;
+    }
+
+    await Promise.all([
+      fetchClasses(false),
+      fetchStudentData(studentId, selectedHoldId, false)
+    ]);
+    setSuccessMessage(`Student ID ${studentId} (X-Student-Id) is active.`);
+  };
+
   const handleCreateClass = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -245,8 +288,10 @@ export function App() {
 
     if (!studentIdValid) {
       setErrorMessage(
-        'Please enter a valid 17-digit Student Birth Registration Number at the top of the page before applying.'
+        'Please enter a 17-digit Student Birth Registration Number (X-Student-Id) in the top input field before applying.'
       );
+      studentInputRef.current?.focus();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
@@ -255,7 +300,7 @@ export function App() {
       const createdHold = await admissionApi.createHold(cls.id, studentId);
       setSelectedHoldId(createdHold.holdId);
       setSuccessMessage(
-        `Seat held in "${cls.name}". Please pay the admission fee before the hold expires.`
+        `Seat held in "${cls.name}" for Student ID ${studentId}. Pay the admission fee before the timer expires.`
       );
       await Promise.all([
         fetchClasses(true),
@@ -277,6 +322,7 @@ export function App() {
 
     if (!studentIdValid) {
       setErrorMessage('Please enter your 17-digit Student Birth Registration Number.');
+      studentInputRef.current?.focus();
       return;
     }
 
@@ -307,6 +353,7 @@ export function App() {
 
     if (!studentIdValid) {
       setErrorMessage('Please enter your 17-digit Student Birth Registration Number.');
+      studentInputRef.current?.focus();
       return;
     }
 
@@ -332,20 +379,31 @@ export function App() {
   };
 
   const activeHoldView = useMemo(() => {
-    const fromList = myHolds.find((h) => h.holdId === selectedHoldId) || myHolds[0] || null;
-    if (!fromList && !selectedHoldDetail) {
+    if (!studentIdValid) {
       return null;
     }
 
-    const holdId = selectedHoldDetail?.holdId || fromList!.holdId;
-    const classId = selectedHoldDetail?.classId || fromList!.classId;
+    const fromList = myHolds.find((h) => h.holdId === selectedHoldId) || myHolds[0] || null;
+    if (!fromList) {
+      return null;
+    }
+
+    const detailMatchesCurrentHold =
+      selectedHoldDetail && selectedHoldDetail.holdId === fromList.holdId;
+
+    const holdId = fromList.holdId;
+    const classId = fromList.classId;
     const className =
-      fromList?.className ||
-      selectedHoldDetail?.className ||
+      fromList.className ||
+      (detailMatchesCurrentHold ? selectedHoldDetail.className : undefined) ||
       classes.find((c) => c.id === classId)?.name ||
       classId;
-    const rawStatus = selectedHoldDetail?.status || fromList!.status;
-    const expiresAt = selectedHoldDetail?.expiresAt || fromList!.expiresAt;
+    const rawStatus = detailMatchesCurrentHold
+      ? selectedHoldDetail.status
+      : fromList.status;
+    const expiresAt = detailMatchesCurrentHold
+      ? selectedHoldDetail.expiresAt
+      : fromList.expiresAt;
 
     const timer = formatRemainingTime(expiresAt, nowMs);
     const effectiveStatus =
@@ -359,7 +417,7 @@ export function App() {
       expiresAt,
       timer
     };
-  }, [myHolds, selectedHoldId, selectedHoldDetail, classes, nowMs]);
+  }, [studentIdValid, myHolds, selectedHoldId, selectedHoldDetail, classes, nowMs]);
 
   const showAdminSection = activeTab === 'all' || activeTab === 'admin';
   const showClassesSection = activeTab === 'all' || activeTab === 'classes';
@@ -377,32 +435,60 @@ export function App() {
             </p>
           </div>
 
-          <div className="student-identity-bar">
+          <form className="student-identity-bar" onSubmit={handleStudentIdSubmit}>
             <label htmlFor="student-id-input" className="student-identity-label">
               Student Birth Registration No. (17 Digits / X-Student-Id)
             </label>
             <div className="student-identity-input-wrap">
               <input
+                ref={studentInputRef}
                 id="student-id-input"
                 type="text"
                 inputMode="numeric"
-                maxLength={17}
                 value={studentId}
-                onChange={(e) => {
-                  const digitsOnly = e.target.value.replace(/\D/g, '').slice(0, 17);
-                  setStudentId(digitsOnly);
-                  setErrorMessage(null);
-                }}
-                placeholder="Enter 17-digit number (e.g. 20152691234567890)"
+                onChange={(e) => updateStudentIdValue(e.target.value)}
+                placeholder="Enter 17-digit Birth Reg. No. (e.g. 20152691234567890)"
                 className={`student-id-input ${studentIdValid ? 'valid' : ''}`}
               />
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                Set ID
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                style={{ whiteSpace: 'nowrap' }}
+                onClick={() => {
+                  const sampleId = generateSampleStudentId();
+                  updateStudentIdValue(sampleId);
+                  setSuccessMessage(`Switched to sample 17-digit Student ID: ${sampleId}`);
+                }}
+              >
+                New Sample ID
+              </button>
+              {studentId.length > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    updateStudentIdValue('');
+                    setSuccessMessage(null);
+                    studentInputRef.current?.focus();
+                  }}
+                >
+                  Clear
+                </button>
+              )}
             </div>
             <span className={`student-id-hint ${studentIdValid ? 'valid' : ''}`}>
               {studentIdValid
-                ? `Valid Student ID (${studentId.length}/17 digits)`
-                : `Enter all 17 numeric digits (${studentId.length}/17 entered)`}
+                ? `Active Header — X-Student-Id: ${studentId} (17/17 digits)`
+                : `Enter 17 numeric digits (${studentId.length}/17 entered — English or Bangla digits supported)`}
             </span>
-          </div>
+          </form>
         </div>
       </header>
 
@@ -550,13 +636,15 @@ export function App() {
                   </thead>
                   <tbody>
                     {classes.map((cls) => {
-                      const existingStudentHold = myHolds.find(
-                        (h) =>
-                          h.classId === cls.id &&
-                          (h.status === 'CONFIRMED' ||
-                            (h.status === 'HELD' &&
-                              !formatRemainingTime(h.expiresAt, nowMs).expired))
-                      );
+                      const existingStudentHold = studentIdValid
+                        ? myHolds.find(
+                            (h) =>
+                              h.classId === cls.id &&
+                              (h.status === 'CONFIRMED' ||
+                                (h.status === 'HELD' &&
+                                  !formatRemainingTime(h.expiresAt, nowMs).expired))
+                          )
+                        : undefined;
 
                       const isFull = cls.availableSeats <= 0;
                       const isBusy = busyActionId === cls.id;
@@ -589,22 +677,48 @@ export function App() {
                             {cls.availableSeats}
                           </td>
                           <td>
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              disabled={isFull || Boolean(existingStudentHold) || isBusy}
-                              onClick={() => handleApplyHold(cls)}
-                            >
-                              {isBusy
-                                ? 'Applying...'
-                                : existingStudentHold
-                                ? existingStudentHold.status === 'CONFIRMED'
-                                  ? 'Confirmed'
-                                  : 'Applied (Held)'
-                                : isFull
-                                ? 'No Seats'
-                                : 'Apply'}
-                            </button>
+                            {existingStudentHold ? (
+                              <div className="action-group">
+                                <span
+                                  className={`status-badge status-${existingStudentHold.status}`}
+                                >
+                                  {existingStudentHold.status === 'CONFIRMED'
+                                    ? 'Confirmed'
+                                    : 'Seat Held'}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary btn-sm"
+                                  onClick={() => {
+                                    setSelectedHoldId(existingStudentHold.holdId);
+                                    if (activeTab === 'classes') {
+                                      setActiveTab('application');
+                                    } else {
+                                      applicationPanelRef.current?.scrollIntoView({
+                                        behavior: 'smooth'
+                                      });
+                                    }
+                                  }}
+                                >
+                                  {existingStudentHold.status === 'HELD'
+                                    ? 'Pay / Cancel'
+                                    : 'View Status'}
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-primary btn-sm"
+                                disabled={isFull || isBusy}
+                                onClick={() => handleApplyHold(cls)}
+                              >
+                                {isBusy
+                                  ? 'Applying...'
+                                  : isFull
+                                  ? 'No Seats'
+                                  : 'Apply'}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -617,7 +731,11 @@ export function App() {
         )}
 
         {showApplicationSection && (
-          <section className="panel" aria-label="Application Status">
+          <section
+            ref={applicationPanelRef}
+            className="panel"
+            aria-label="Application Status"
+          >
             <div className="panel-header">
               <h2 className="panel-title">Application Status</h2>
             </div>
@@ -628,11 +746,17 @@ export function App() {
                 </div>
               ) : !activeHoldView ? (
                 <div className="empty-notice">
-                  No active application selected. Click "Apply" on an available class in the Class List.
+                  No active application for Student ID {studentId}. Click "Apply" on an available class in the Class List.
                 </div>
               ) : (
                 <div data-testid="active-hold-panel">
                   <div className="application-detail-grid">
+                    <div className="detail-item">
+                      <span className="detail-label">Student ID (X-Student-Id)</span>
+                      <span className="detail-value" style={{ fontFamily: 'monospace' }}>
+                        {studentId}
+                      </span>
+                    </div>
                     <div className="detail-item">
                       <span className="detail-label">Class Name</span>
                       <span className="detail-value">{activeHoldView.className}</span>
