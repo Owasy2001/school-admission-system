@@ -13,6 +13,30 @@ const SELECTED_HOLD_STORAGE_KEY = 'school_admission_selected_hold_id';
 
 type ActiveTab = 'all' | 'classes' | 'application' | 'my-applications' | 'admin';
 
+function getTabFromPathname(pathname: string): ActiveTab {
+  const cleaned = pathname.replace(/\/+$/, '').toLowerCase();
+  if (cleaned === '/classes') return 'classes';
+  if (cleaned === '/application') return 'application';
+  if (cleaned === '/my-applications') return 'my-applications';
+  if (cleaned === '/admin') return 'admin';
+  return 'all';
+}
+
+function getPathForTab(tab: ActiveTab): string {
+  switch (tab) {
+    case 'classes':
+      return '/classes';
+    case 'application':
+      return '/application';
+    case 'my-applications':
+      return '/my-applications';
+    case 'admin':
+      return '/admin';
+    default:
+      return '/';
+  }
+}
+
 export function isValidStudentId(id: string): boolean {
   const normalized = normalizeDigits(id.trim());
   return normalized.length === 17;
@@ -46,9 +70,27 @@ function generateSampleStudentId(): string {
 }
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('all');
+  const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
+    getTabFromPathname(window.location.pathname)
+  );
   const studentInputRef = useRef<HTMLInputElement | null>(null);
   const applicationPanelRef = useRef<HTMLElement | null>(null);
+
+  const navigateTab = useCallback((tab: ActiveTab) => {
+    setActiveTab(tab);
+    const targetPath = getPathForTab(tab);
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({}, '', targetPath);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setActiveTab(getTabFromPathname(window.location.pathname));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const [studentId, setStudentId] = useState<string>(() => {
     try {
@@ -497,35 +539,35 @@ export function App() {
           <button
             type="button"
             className={`nav-tab ${activeTab === 'all' ? 'active' : ''}`}
-            onClick={() => setActiveTab('all')}
+            onClick={() => navigateTab('all')}
           >
             All Screens
           </button>
           <button
             type="button"
             className={`nav-tab ${activeTab === 'classes' ? 'active' : ''}`}
-            onClick={() => setActiveTab('classes')}
+            onClick={() => navigateTab('classes')}
           >
             Class List
           </button>
           <button
             type="button"
             className={`nav-tab ${activeTab === 'application' ? 'active' : ''}`}
-            onClick={() => setActiveTab('application')}
+            onClick={() => navigateTab('application')}
           >
             Application Status
           </button>
           <button
             type="button"
             className={`nav-tab ${activeTab === 'my-applications' ? 'active' : ''}`}
-            onClick={() => setActiveTab('my-applications')}
+            onClick={() => navigateTab('my-applications')}
           >
             My Applications ({myHolds.length})
           </button>
           <button
             type="button"
             className={`nav-tab ${activeTab === 'admin' ? 'active' : ''}`}
-            onClick={() => setActiveTab('admin')}
+            onClick={() => navigateTab('admin')}
           >
             Create Class (School Admin)
           </button>
@@ -692,7 +734,7 @@ export function App() {
                                   onClick={() => {
                                     setSelectedHoldId(existingStudentHold.holdId);
                                     if (activeTab === 'classes') {
-                                      setActiveTab('application');
+                                      navigateTab('application');
                                     } else {
                                       applicationPanelRef.current?.scrollIntoView({
                                         behavior: 'smooth'
