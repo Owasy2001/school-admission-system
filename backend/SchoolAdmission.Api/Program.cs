@@ -157,9 +157,16 @@ app.Run();
 static string ResolveConnectionString(IConfiguration configuration)
 {
     var raw = Environment.GetEnvironmentVariable("DATABASE_URL")
+              ?? Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
               ?? Environment.GetEnvironmentVariable("DB_CONNECTION_STRING")
-              ?? Environment.GetEnvironmentVariable("CONNECTION_STRING")
-              ?? configuration.GetConnectionString("DefaultConnection");
+              ?? Environment.GetEnvironmentVariable("CONNECTION_STRING");
+
+    if (string.IsNullOrWhiteSpace(raw) &&
+        Environment.GetEnvironmentVariable("POSTGRES_HOST") == null &&
+        Environment.GetEnvironmentVariable("DB_HOST") == null)
+    {
+        raw = configuration.GetConnectionString("DefaultConnection");
+    }
 
     if (!string.IsNullOrWhiteSpace(raw))
     {

@@ -351,4 +351,49 @@ public class AdmissionIntegrationTests
         var missingClassRes = await client.GetAsync("/classes/c_nonexistent");
         Assert.Equal(HttpStatusCode.NotFound, missingClassRes.StatusCode);
     }
+
+    [Fact]
+    public async Task CancelHold_Returns204AndReleasesSeatImmediately()
+    {
+        await using var host = await TestServerHost.CreateAsync();
+        using var client = host.CreateClientInstance();
+
+        var createRes = await client.PostAsJsonAsync("/classes", new
+        {
+            name = "Class 6 - Day Shift",
+            totalSeats = 1
+        });
+        Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
+        var createdClass = await createRes.Content.ReadFromJsonAsync<ClassCreatedResponse>();
+        Assert.NotNull(createdClass);
+
+        var student1 = "20152691234567101";
+        var student2 = "20152691234567102";
+
+        using var holdReq1 = CreateStudentRequest(HttpMethod.Post, $"/classes/{createdClass.Id}/holds", student1);
+        var holdRes1 = await client.SendAsync(holdReq1);
+        Assert.Equal(HttpStatusCode.Created, holdRes1.StatusCode);
+        var hold1 = await holdRes1.Content.ReadFromJsonAsync<HoldCreatedResponse>();
+        Assert.NotNull(hold1);
+
+        using var wrongCancelReq = CreateStudentRequest(HttpMethod.Delete, $"/holds/{hold1.HoldId}", student2);
+        var wrongCancelRes = await client.SendAsync(wrongCancelReq);
+        Assert.Equal(HttpStatusCode.Forbidden, wrongCancelRes.StatusCode);
+
+        using var cancelReq = CreateStudentRequest(HttpMethod.Delete, $"/holds/{hold1.HoldId}", student1);
+        var cancelRes = await client.SendAsync(cancelReq);
+        Assert.Equal(HttpStatusCode.NoContent, cancelRes.StatusCode);
+
+        using var meHoldsReq = CreateStudentRequest(HttpMethod.Get, "/me/holds", student1);
+        var meHoldsRes = await client.SendAsync(meHoldsReq);
+        Assert.Equal(HttpStatusCode.OK, meHoldsRes.StatusCode);
+        var myHolds = await meHoldsRes.Content.ReadFromJsonAsync<List<StudentHoldResponse>>();
+        Assert.NotNull(myHolds);
+        Assert.Single(myHolds);
+        Assert.Equal("CANCELLED", myHolds[0].Status);
+
+        using var holdReq2 = CreateStudentRequest(HttpMethod.Post, $"/classes/{createdClass.Id}/holds", student2);
+        var holdRes2 = await client.SendAsync(holdReq2);
+        Assert.Equal(HttpStatusCode.Created, holdRes2.StatusCode);
+    }
 }

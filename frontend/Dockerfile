@@ -17,6 +17,9 @@ RUN printf 'server {\n\
     server_name _;\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
+    location = /config.js {\n\
+        add_header Cache-Control "no-store, no-cache, must-revalidate";\n\
+    }\n\
     location / {\n\
         try_files $uri $uri/ /index.html;\n\
     }\n\

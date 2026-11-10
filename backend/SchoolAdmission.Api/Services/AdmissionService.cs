@@ -98,7 +98,7 @@ public class AdmissionService
     public static string FormatUtcIso(DateTime dt)
     {
         var utc = dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
-        return utc.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        return utc.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     public async Task<int> ExpireElapsedHoldsAsync(CancellationToken ct = default)

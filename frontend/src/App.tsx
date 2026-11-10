@@ -64,11 +64,6 @@ export function formatRemainingTime(expiresAtIso: string, nowMs: number): {
   };
 }
 
-function generateSampleStudentId(): string {
-  const randomSuffix = String(Math.floor(1000000000 + Math.random() * 9000000000));
-  return `2015269${randomSuffix}`.slice(0, 17);
-}
-
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>(() =>
     getTabFromPathname(window.location.pathname)
@@ -165,13 +160,11 @@ export function App() {
     try {
       const data = await admissionApi.getClasses();
       setClasses(data);
-      if (!silent) {
-        setErrorMessage((prev) =>
-          prev?.includes('Unable to connect') ? null : prev
-        );
-      }
+      setErrorMessage((prev) =>
+        prev?.includes('Unable to connect') ? null : prev
+      );
     } catch (err) {
-      if (!silent) {
+      if (!silent || (err instanceof ApiError && err.code === 'NETWORK_ERROR')) {
         const msg =
           err instanceof ApiError ? err.message : 'Failed to load class list.';
         setErrorMessage(msg);
@@ -499,18 +492,6 @@ export function App() {
               >
                 Set ID
               </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ whiteSpace: 'nowrap' }}
-                onClick={() => {
-                  const sampleId = generateSampleStudentId();
-                  updateStudentIdValue(sampleId);
-                  setSuccessMessage(`Switched to sample 17-digit Student ID: ${sampleId}`);
-                }}
-              >
-                New Sample ID
-              </button>
               {studentId.length > 0 && (
                 <button
                   type="button"
@@ -527,8 +508,8 @@ export function App() {
             </div>
             <span className={`student-id-hint ${studentIdValid ? 'valid' : ''}`}>
               {studentIdValid
-                ? `Active Header — X-Student-Id: ${studentId} (17/17 digits)`
-                : `Enter 17 numeric digits (${studentId.length}/17 entered — English or Bangla digits supported)`}
+                ? `Active Student ID: ${studentId} (17/17 digits)`
+                : `Enter 17 digits (${studentId.length}/17 entered)`}
             </span>
           </form>
         </div>
